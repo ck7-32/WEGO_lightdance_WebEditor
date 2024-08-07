@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MainWindow</title>
+    <script src="https://unpkg.com/wavesurfer.js@6.6.3"></script>
+    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.markers.js"></script>
+    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.minimap.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: rgb(22, 22, 22);
+            color: white;
+        }
+        .container {
+            width: 1429px;
+            height: 807px;
+            position: relative;
+        }
+        .mainwindow {
+            width: 961px;
+            height: 561px;
+            position: relative;
+        }
+        .element {
+            position: absolute;
+        }
+        select, input[type="text"] {
+            width: 80px;
+            background-color: #333;
+            color: white;
+            border: 1px solid #555;
+        }
+        button {
+            cursor: pointer;
+            background-color: #121626;
+            color: white;
+            border: 1px solid #666;
+        }
+        label {
+            font-family: '微軟正黑體', sans-serif;
+            font-size: 15px;
+        }
+        #html {
+            background-color: #333333;
+        }
+        #waveform {
+            width: 961px;
+            height: 120px;
+            background-color: #000000;
+            margin: 0 auto;
+        }
+        #minimap {
+            width: 961px;
+            height: 35px;
+            background-color: #000000;
+            margin: 0 auto;
+        }
+        #zoom-slider {
+            width: 961px;
+            height: 10px;
+            margin: 20px auto;
+        }
+        #controls {
+            margin: 20px auto;
+            width: 850px;
+            text-align: center;
+        }
+      
+
+
+
+    </style>
+    <script type="module">
+        
+        let wavesurfer;
+        var regionsPlugin = WaveSurfer.regions.create();
+        var markersPlugin = WaveSurfer.markers.create();
+        let markers = [];
+        let audiopath;
+        
+      
+        
+        function getCurrentTime() {
+            var currentTime = wavesurfer.getCurrentTime();
+            console.log('Current Time:', currentTime);
+            
+        }
+        
+        function setTime(time) {
+            const duration = wavesurfer.getDuration();
+            const progress = time / duration;
+            wavesurfer.seekTo(progress);
+        }
+
+        async function updateFrameTimes(regions) {
+            const frametimes = regions.map(region => region.start * 1000); // 转换为毫秒
+            frametimes.push(regions[regions.length - 1].end * 1000); // 添加最后一个区域的结束时间
+
+            const data = { frametimes };
+
+            try {
+                const response = await fetch('/update-fraetimes', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+
+                const result = await response.json();
+                console.log('Frame times updated:', result);
+            } catch (error) {
+                console.error('Error updating frame times:', error);
+            }
+        }
+
+        function reloadRegions() {
+            fetch('data.json')
+                .then(response => response.json())
+                .then(data => {
+                    const frametimes = data.frametimes;
+                    wavesurfer.clearRegions(); // 清除现有的regions
+                    for (let i = 0; i < frametimes.length ; i++) {
+                        const startTime = frametimes[i] / 1000; // 转换为秒
+                        const endTime = frametimes[i + 1] / 1000; // 转换为秒
+                        wavesurfer.addRegion({
+                            start: startTime,
+                            end: endTime,
+                            color: i % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)', // 基数偶数段不同颜色
+                            resize: false, // 允许调整大小
+                            drag: false // 允许拖动
+                        });
+                    }
+                    // 添加最后一个时间点的标记
+                    const lastStartTime = frametimes[frametimes.length ] / 1000;
+                    wavesurfer.addRegion({
+                        start: lastStartTime,
+                        end: lastStartTime + 0.5, // 给最后一个标记一个默认的持续时间
+                        color: frametimes.length % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)', // 基数偶数段不同颜色
+                        resize: false, // 允许调整大小
+                        drag: false // 允许拖动
+                    });
+                })
+                .catch(error => console.error('Error loading data.json:', error));
+                return;
+        }
+
+        
+                // 增加滑動條的值
+        function increaseSliderValue() {
+            var slider = document.getElementById('zoom-slider');
+            var currentValue = parseInt(slider.value, 10);
+            if (currentValue < slider.max) {
+                slider.value = currentValue + 5;
+                updateDisplayValue(slider.value);
+                wavesurfer.zoom(Number( slider.value));
+            }
+        }
+
+        // 減少滑動條的值
+        function decreaseSliderValue() {
+            var slider = document.getElementById('zoom-slider');
+            var currentValue = parseInt(slider.value, 10);
+            if (currentValue > slider.min) {
+                slider.value = currentValue - 5;
+                updateDisplayValue(slider.value);
+                wavesurfer.zoom(Number( slider.value));
+            }
+        }
+
+        // 更新顯示值
+        function updateDisplayValue(value) {
+            var displayValue = document.getElementById('zoom-slider');
+          wavesurfer.zoom(Number(value));
+           
+        }
+
+        // 当網頁載入完成後執行的函式
+        
+        function scrollWaveSurferLeft() {
+            var currentScroll = wavesurfer.drawer.wrapper.scrollLeft;
+            if (currentScroll > 0) {
+                wavesurfer.drawer.wrapper.scrollLeft = currentScroll - 10; // 每次滾動 10px
+            }
+        }
+
+        function scrollWaveSurferRight() {
+            var currentScroll = wavesurfer.drawer.wrapper.scrollLeft;
+            wavesurfer.drawer.wrapper.scrollLeft = currentScroll + 10; // 每次滾動 10px
+         
+        }
+     
+        async function fetchData(url) {
+            try {
+                const response = await fetch(url);
+                return await response.json();
+            } catch (error) {
+                console.error(`Error fetching data from ${url}:`, error);
+                throw error;
+            }
+        }
+        async function initializeAudio() {
+            try {
+                const data = await fetchData(settingUrl);
+                audiopath = `/static/${data.audio}`;
+                console.log('Audio path initialized:', audiopath);
+                await initializeWaveSurfer();
+            } catch (error) {
+                console.error('Error initializing audio:', error);
+            }
+        }
+
+        async function initializeWaveSurfer() {
+           
+            wavesurfer = WaveSurfer.create({
+                container: '#waveform',
+                waveColor: '#FFFFFF',
+                progressColor: '#8a8a8a',
+                height: 120,
+                hideScrollbar: true,
+                interact: true,
+                plugins: [
+                    regionsPlugin,
+                    markersPlugin,
+                    WaveSurfer.minimap.create({
+                    container: '#minimap',
+                    waveColor: '#FFFFFF',
+                    progressColor: '#777',
+                    height: 35
+                    })  ,
+                    
+                ]
+            });
+
+
+            if (!regionsPlugin || !markersPlugin) {
+                console.error('WaveSurfer 插件未正确初始化');
+                return;
+            }
+
+            // 加载音频
+            try {
+                await wavesurfer.load(audiopath);
+            } catch (error) {
+                console.error('加载音频时出错:', error);
+                return;
+            }
+            // 加载音频
+            await wavesurfer.load(audiopath);
+
+            wavesurfer.on('ready', () => {
+                console.log('WaveSurfer is ready');
+                loadDataFromJSON();
+                console.log('載入數據');
+                setupEventListeners();
+                console.log('綁定事件');
+                var slider = document.getElementById('zoom-slider');
+                console.log('綁定滑動條');
+                slider.addEventListener('input', function() {
+                updateDisplayValue(this.value);
+                });
+                Object.assign(window, {
+                    wavesurfer,
+                });
+
+                // 启动动画
+                var startTime = (new Date()).getTime();
+                animate(darr, canvas, ctx, startTime);
+            });
+        }
+
+        function setupEventListeners() {
+            wavesurfer.on('region-update-end', updateJSON);
+            wavesurfer.on('marker-drop', function(marker) {
+                updateMarker(marker.label,marker.time);
+            });
+        }
+
+        
+        function updateMarker(id,newtime) {
+            socket.emit("connect_event");
+        }
+
+        function updateJSON() {
+            const data = { 
+                frametimes: regionsPlugin.getRegions().map(r => r.start * 1000),
+                markers: markers.map(m => m.time * 1000)
+            };
+            localStorage.setItem('audioData', JSON.stringify(data));
+            updateFrameTimes(regionsPlugin.getRegions());
+        }
+
+        function loadDataFromJSON() {
+            const savedData = localStorage.getItem('audioData');
+            if (savedData) {
+
+                loadData(JSON.parse(savedData));
+                
+            } else {
+                console.log('載入數據1');
+                fetch(dataUrl)
+                    .then(response => response.json())
+                    .then(data => {
+                        loadData(data);
+                    })
+                    .catch(error => console.error('Error loading data:', error));
+            }
+        }
+
+        function loadData(data) {
+                // 加载 regions
+                wavesurfer.clearRegions();
+
+                if (data.frametimes) {
+                    for (let i = 0; i < data.frametimes.length - 1; i++) {
+                        const startTime = data.frametimes[i] / 1000;
+                        const endTime = data.frametimes[i + 1] / 1000;
+                        wavesurfer.addRegion({
+                            start: startTime,
+                            end: endTime,
+                            color: i % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)',
+                            resize: false,
+                            drag: false
+                        });
+                    }
+                }
+
+                // 加载 markers
+               
+                wavesurfer.clearMarkers();
+                
+
+                markers = [];
+                if (data.frametimes) {
+                    data.frametimes.forEach((time, index) => {
+                        const markerId = wavesurfer.addMarker({
+                            time: time / 1000,
+                            color: 'rgba(120, 179, 150, 1)',
+                            position: 'top',
+                            id:index.toString(),
+                            label:index.toString(),
+                            draggable: true
+                        });
+                        markers.push({ id: markerId, time: time / 1000 });
+                    });
+                }
+            }
+        Object.assign(window, {
+        loadDataFromJSON,
+        initializeWaveSurfer,
+        initializeAudio,
+        fetchData,
+        getCurrentTime,
+        setTime,
+        reloadRegions,
+        increaseSliderValue,
+        decreaseSliderValue,
+        scrollWaveSurferLeft,
+        scrollWaveSurferRight,
+    });
+    </script>
+</head>
+<body>
+    <div class="container">
+        <!-- Color selection boxes and labels -->
+        <div class="element" style="left: 190px; top: 550px;"><select id="color0"></select></div>
+        <div class="element" style="left: 190px; top: 580px;"><select id="color1"></select></div>
+        <div class="element" style="left: 190px; top: 610px;"><select id="color2"></select></div>
+        <div class="element" style="left: 190px; top: 640px;"><select id="color3"></select></div>
+        <div class="element" style="left: 190px; top: 670px;"><select id="color4"></select></div>
+        <div class="element" style="left: 190px; top: 700px;"><select id="color5"></select></div>
+
+        <div class="element" style="left: 120px; top: 550px;"><label id="part0">TextLabel</label></div>
+        <div class="element" style="left: 120px; top: 580px;"><label id="part1">TextLabel</label></div>
+        <div class="element" style="left: 120px; top: 610px;"><label id="part2">TextLabel</label></div>
+        <div class="element" style="left: 120px; top: 640px;"><label id="part3">TextLabel</label></div>
+        <div class="element" style="left: 120px; top: 670px;"><label id="part4">TextLabel</label></div>
+        <div class="element" style="left: 120px; top: 700px;"><label id="part5">TextLabel</label></div>
+
+        <div class="element" style="left: 350px; top: 550px;"><select id="color6"></select></div>
+        <div class="element" style="left: 350px; top: 580px;"><select id="color7"></select></div>
+        <div class="element" style="left: 350px; top: 610px;"><select id="color8"></select></div>
+        <div class="element" style="left: 350px; top: 640px;"><select id="color9"></select></div>
+        <div class="element" style="left: 350px; top: 670px;"><select id="color10"></select></div>
+        <div class="element" style="left: 350px; top: 700px;"><select id="color11"></select></div>
+
+        <div class="element" style="left: 280px; top: 550px;"><label id="part6">TextLabel</label></div>
+        <div class="element" style="left: 280px; top: 580px;"><label id="part7">TextLabel</label></div>
+        <div class="element" style="left: 280px; top: 610px;"><label id="part8">TextLabel</label></div>
+        <div class="element" style="left: 280px; top: 640px;"><label id="part9">TextLabel</label></div>
+        <div class="element" style="left: 280px; top: 670px;"><label id="part10">TextLabel</label></div>
+        <div class="element" style="left: 280px; top: 700px;"><label id="part11">TextLabel</label></div>
+
+        <div class="element" style="left: 520px; top: 550px;"><select id="color12"></select></div>
+        <div class="element" style="left: 520px; top: 580px;"><select id="color13"></select></div>
+        <div class="element" style="left: 520px; top: 610px;"><select id="color14"></select></div>
+        <div class="element" style="left: 520px; top: 640px;"><select id="color15"></select></div>
+        <div class="element" style="left: 520px; top: 670px;"><select id="color16"></select></div>
+        <div class="element" style="left: 520px; top: 700px;"><select id="color17"></select></div>
+
+        <div class="element" style="left: 450px; top: 550px;"><label id="part12">TextLabel</label></div>
+        <div class="element" style="left: 450px; top: 580px;"><label id="part13">TextLabel</label></div>
+        <div class="element" style="left: 450px; top: 610px;"><label id="part14">TextLabel</label></div>
+        <div class="element" style="left: 450px; top: 640px;"><label id="part15">TextLabel</label></div>
+        <div class="element" style="left: 450px; top: 670px;"><label id="part16">TextLabel</label></div>
+        <div class="element" style="left: 450px; top: 700px;"><label id="part17">TextLabel</label></div>
+
+        <!-- Buttons -->
+        <div class="element" style="left: 620px; top: 700px;"><button id="save">儲存</button></div>
+        <div class="element" style="left: 980px; top: 680px;"><button id="newframe">新增key frame</button></div>
+        <div class="element" style="left: 980px; top: 710px;"><button id="delframe">刪除key frame</button></div>
+
+        <!-- Main content area -->
+        <div class="mainwindow" style="left: 20px; top: 10px; width: 961px; height: 521px;"><div id="html"></div>
+        <center>
+            <canvas id="myCanvas" width="961" height="300" style="background-color: #000000" autoplay></canvas>
+            <div id="waveform"></div>
+            <div id="minimap"></div>
+            <input id="zoom-slider" type="range" min="1" max="200" value="100">
+           
+        </center>
+    
+    
+        <script src="{{ url_for('static', filename='js/dancer.js') }}"></script>
+        <script src="{{ url_for('static', filename='js/pos.js') }}"></script>
+        
+    
+        <script>
+    
+            const settingUrl = "{{ url_for('static', filename='setting.json') }}";
+            const dataUrl = "{{ url_for('static', filename='data.json') }}";
+            
+    
+            function initializeQWebChannel() {
+                new QWebChannel(qt.webChannelTransport, function(channel) {
+                    window.handler = channel.objects.handler;
+                    console.log('QWebChannel initialized');
+                });
+            }
+            document.addEventListener('DOMContentLoaded', async function() {
+          
+                await initializeAudio();
+                await initializeSettings();
+                await initializeData();
+            });
+            
+        </script> 
+        <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+    
+    
+    
+    
+    </div>
+
+        <!-- Time and frame information -->
+        <div class="element" style="left: 1210px; top: 570px;"><label id="nowtime">TextLabel</label></div>
+        <div class="element" style="left: 950px; top: 570px;"><label id="nowframe">TextLabel</label></div>
+        <div class="element" style="left: 980px; top: 600px;"><label id="nowframetime">TextLabel</label></div>
+        <div class="element" style="left: 1110px; top: 570px;"><label id="nowframetime_2">當前時間</label></div>
+        <div class="element" style="left: 850px; top: 570px;"><label id="nowframetime_3">當前幀</label></div>
+        <div class="element" style="left: 850px; top: 600px;"><label id="nowframetime_4">幀開始時間</label></div>
+
+        <!-- Color management -->
+        <div class="element" style="left: 990px; top: 50px;"><input type="text" id="colorname"></div>
+        <div class="element" style="left: 1130px; top: 50px;"><select id="colors"></select></div>
+        <div class="element" style="left: 990px; top: 80px;"><button id="addcolor">add color</button></div>
+        <div class="element" style="left: 1230px; top: 80px;"><button id="delcolor">delete color</button></div>
+        <div class="element" style="left: 1130px; top: 80px;"><button id="showcolor">show color</button></div>
+        <div class="element" style="left: 1130px; top: 120px; width: 81px; height: 31px;"><div id="colorpreview"></div></div>
+
+        <!-- Dancer selection -->
+        <div class="element" style="left: 20px; top: 550px;"><select id="Dancers"></select></div>
+        <div class="element" style="left: 10px; top: 580px;"><label id="dancernow">dancer</label></div>
+
+        <div class="element" style="left: 990px; top: 20px;"><label id="text">命名顏色</label></div>
+
+        <!-- Preset management -->
+        <div class="element" style="left: 1120px; top: 190px;"><label id="nowframetime_5">name preset</label></div>
+        <div class="element" style="left: 1120px; top: 220px;"><input type="text" id="presetname"></div>
+        <div class="element" style="left: 990px; top: 220px;"><select id="presets"></select></div>
+        <div class="element" style="left: 1120px; top: 250px;"><button id="savepreset">save as preset</button></div>
+        <div class="element" style="left: 990px; top: 340px;"><button id="delpreset">delete this preset</button></div>
+        <div class="element" style="left: 990px; top: 190px;"><label id="nowframetime_6">presets</label></div>
+        <div class="element" style="left: 990px; top: 250px;"><button id="loadpreset">load this preset</button></div>
+
+        <!-- Time setting -->
+        <div class="element" style="left: 850px; top: 680px;"><input type="text" id="settime"></div>
+        <div class="element" style="left: 850px; top: 710px;"><button id="settimebtn">載入時間(秒)</button></div>
+
+        <!-- Frame time management -->
+        <div class="element" style="left: 850px; top: 620px;"><button id="loadframestarttime">載入幀開始時間(秒)</button></div>
+        <div class="element" style="left: 1110px; top: 610px;"><button id="set_frame_start_bynowtime">當前時間設為當前偵開始時間</button></div>
+        <div class="element" style="left: 1110px; top: 640px;"><button id="set_frame_end_bynowtime">當前時間設為當前偵結束時間</button></div>
+
+        <!-- Color editing -->
+        <div class="element" style="left: 1230px; top: 50px;"><button id="editcolor">edit color</button></div>
+        <div class="element" style="left: 1330px; top: 50px;"><button id="renamecolor">renamecolor</button></div>
+    </div>
+    <script>var socket = io();</script>
+    <script src="{{ url_for('static', filename='js/editor.js') }}"></script>
+</body>
+</html>
