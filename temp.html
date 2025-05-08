@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <title>Lightdance Editor Web – 整合 WaveSurfer Marker & Region</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- WaveSurfer v6.6.3 及 UMD plugins -->
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3"></script>
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.markers.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.minimap.js"></script>
+
+  <style>
+    :root{--bg:#1e1e1e;--panel:#252525;--fg:#eee;--primary:#3a3a3a;--border:#444}
+    *{box-sizing:border-box}
+    body{margin:0;font-family:"Microsoft JhengHei",Arial,sans-serif;background:var(--bg);color:var(--fg);display:flex;flex-direction:column;min-height:100vh}
+    .container{flex:1;display:grid;grid-template-columns:1fr 340px;gap:8px;padding:8px}
+    .viewer{display:flex;flex-direction:column;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px;gap:6px}
+    #myCanvas{width:100%;max-width:850px;height:300px;background:#000;border:1px solid var(--border);border-radius:4px;margin:0 auto}
+    #waveform,#minimap{width:100%;max-width:850px;margin:0 auto;background:#000;border:1px solid var(--border);border-radius:4px}
+    #waveform{height:120px} #minimap{height:35px}
+    #zoom-slider{width:100%;max-width:850px;margin:4px auto 0}
+    .partPanel{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px}
+    .part{display:flex;flex-direction:column;gap:2px} .part label{font-size:12px}
+    .controlBar{display:flex;flex-wrap:wrap;gap:12px 20px;padding:10px;border-top:1px solid var(--border);background:#181818}
+    .controlBar section{background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px;min-width:230px;flex:1 1 230px}
+    select,input,button{width:100%;padding:4px 6px;background:var(--primary);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:12px}
+    button:hover{transform:translateY(-2px);box-shadow:0 4px 8px rgba(0,0,0,.35);transition:.15s}
+    .color-box{width:38px;height:18px;border:1px solid var(--border);border-radius:4px;margin-top:4px}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="viewer">
+      <canvas id="myCanvas" width="850" height="300"></canvas>
+      <div id="waveform"></div>
+      <div id="minimap"></div>
+      <input id="zoom-slider" type="range" min="1" max="200" value="100" />
+    </div>
+
+    <div class="partPanel" id="partPanel">
+      <select id="dancerSelect" style="grid-column:span 3"></select>
+    </div>
+  </div>
+
+  <div class="controlBar">
+    <section>
+      <h3>標記 / 區段</h3>
+      <button id="addMarkerBtn">Add Marker (M)</button>
+      <button id="addRegionBtn">Add Region 5s (R)</button>
+      <button id="reloadRegionBtn">Reload JSON Regions</button>
+    </section>
+    <section>
+      <h3>Zoom</h3>
+      <button id="zoomOutBtn">-</button>
+      <button id="zoomInBtn">+</button>
+      <button id="scrollLeftBtn">◄</button>
+      <button id="scrollRightBtn">►</button>
+    </section>
+  </div>
+
+  <!-- 舊依賴保持 -->
+  <script src="pos.js"></script>
+  <script src="dancer.js"></script>
+  <script src="main.js"></script>
+
+  <script>
+    /* ===== Stub 後端 / Qt ===== */
+    window.fetchData = async u=>{const r=await fetch(u);if(!r.ok)throw new Error(r.status);return r.json();};
+    window.handler={updatepos(){},updateframe(){},updatepostime(){},selectdancer(){}};
+    window.isdragging=false;
+
+    /* ===== UI 配置資料 ===== */
+    const parts=["頭盔","面罩","左肩","右肩","左臂","右臂","左手","右手","胸口","背部","腰帶","左大腿","右大腿","左小腿","右小腿","左鞋","右鞋","道具"];
+    const palette=["#000","#f00","#0f0","#00f","#ff0","#f0f","#0ff","#fff"];
+    const dancerNames=["migo","miqo"];
+
+    /* ===== WaveSurfer 全域 ===== */
+    let ws, regionsPlugin, markersPlugin, markerCount=0, posmarkers=[];
+
+    /* ===== 建立介面 ===== */
+    function buildInterface(){
+      const dancerSel=document.getElementById('dancerSelect');
+      dancerNames.forEach(n=>dancerSel.appendChild(new Option(n,n)));
+      const panel=document.getElementById('partPanel');
+      parts.forEach(p=>{
+        const wrap=document.createElement('div');wrap.className='part';
+        wrap.innerHTML=`<label>${p}</label><select></select>`;
+        palette.forEach(c=>{const o=new Option(c,c);o.style.backgroundColor=c;wrap.querySelector('select').appendChild(o);});
+        panel.appendChild(wrap);
+      });
+    }
+
+    /* ===== WaveSurfer 初始化 ===== */
+    function initWaveSurfer(audio='song.mp3'){
+      regionsPlugin = WaveSurfer.regions.create();
+      markersPlugin = WaveSurfer.markers.create();
+      ws = WaveSurfer.create({
+        container:'#waveform',waveColor:'#fff',progressColor:'#8a8a8a',height:120,hideScrollbar:true,pixelRatio:1,partialRender:true,
+        plugins:[regionsPlugin,markersPlugin,WaveSurfer.minimap.create({container:'#minimap',waveColor:'#fff',progressColor:'#777',height:35})]
+      });
+      ws.load(audio);
+      ws.on('ready',()=>{
+        window.wavesurfer=ws;
+        window.getCurrentTime=()=>ws.getCurrentTime();
+        window.setTime=t=>{const d=ws.getDuration();if(d)ws.seekTo(t/d);}  
+        document.getElementById('zoom-slider').addEventListener('input',e=>ws.zoom(Number(e.target.value)));
+      });
+    }
+
+    /* ===== Marker & Region 相關 ===== */
+    function addMarker(){
+      const t=ws.getCurrentTime();
+      ws.addMarker({time:t,label:'M'+(++markerCount),position:'top',color:'rgba(255,255,0,1)',draggable:true});
+    }
+    function addRegion(){
+      const s=ws.getCurrentTime();
+      ws.addRegion({start:s,end:s+5,color:'rgba(0,255,0,0.2)',resize:false,drag:false});
+    }
+
+    /* ===== 滾輪縮放 / 捲動 ===== */
+    function bindWheelZoom(){
+      const slider=document.getElementById('zoom-slider');
+      const wf=document.getElementById('waveform');
+      wf.addEventListener('wheel',e=>{
+        e.preventDefault();
+        if(e.ctrlKey){
+          let z=parseInt(slider.value,10)+(e.deltaY<0?30:-30);
+          z=Math.max(1,Math.min(200,z));
+          slider.value=z;ws.zoom(z);
+        }else ws.drawer.wrapper.scrollLeft+=e.deltaY>0?30:-30;
+      },{passive:false});
+    }
+
+    /* ===== 載入並啟動 ===== */
+    async function boot(){
+      buildInterface();
+      let audio='song.mp3';
+      try{const s=await fetchData('../data/setting.json');if(s.audio)audio=s.audio;}catch{}
+      initWaveSurfer(audio);
+      bindWheelZoom();
+      // 按鈕 & 熱鍵
+      document.getElementById('addMarkerBtn').onclick=addMarker;
+      document.getElementById('addRegionBtn').onclick=addRegion;
+      document.getElementById('reloadRegionBtn').onclick=()=>loadDataFromJSON();
+      document.getElementById('zoomInBtn').onclick=()=>document.getElementById('zoom-slider').stepUp();
+      document.getElementById('zoomOutBtn').onclick=()=>document.getElementById('zoom-slider').stepDown();
+      document.getElementById('scrollLeftBtn').onclick=()=>ws.drawer.wrapper.scrollLeft-=30;
+      document.getElementById('scrollRightBtn').onclick=()=>ws.drawer.wrapper.scrollLeft+=30;
+      document.addEventListener('keydown',e=>{if(e.key==='m'||e.key==='M')addMarker();if(e.key==='r'||e.key==='R')addRegion();});
+    }
+
+    /* ===== JSON 讀寫 (沿用舊邏輯) ===== */
+    function updateJSON(){
+      const data={frametimes:regionsPlugin.getRegions().map(r=>r.start*1000)};
+      localStorage.setItem('audioData',JSON.stringify(data));
+    }
+    function loadDataFromJSON(){
+      const save=localStorage.getItem('audioData');
+      if(save){loadData(JSON.parse(save));return;}
+      fetch('../data/data.json').then(r=>r.json()).then(loadData);
+    }
+    function loadData(data){
+      ws.clearRegions();ws.clearMarkers();
+      if(data.frametimes){data.frametimes.forEach((t,i)=>{
+        if(i<data.frametimes.length-1)ws.addRegion({start:t/1000,end:data.frametimes[i+1]/1000,color:i%2?'rgba(0,50,0,.5)':'rgba(50,0,0,.5)',resize:false,drag:false});
+        if(i)ws.addMarker({time:t/1000,label:i.toString(),position:'top',color:'rgba(120,179,150,1)',draggable:true});
+      });}
+    }
+
+    window.addEventListener('DOMContentLoaded',boot);
+  </script>
+</body>
+</html>

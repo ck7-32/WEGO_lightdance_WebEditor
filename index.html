@@ -1,235 +1,579 @@
-<!DOCTYPE HTML>
-<html>
+<!DOCTYPE html>
+<html lang="zh-Hant">
 <head>
-    <meta charset="UTF-8">
-    <title>Your Page Title</title>
-    <!-- 首先加载 WaveSurfer 及其插件 -->
-    <script src="https://unpkg.com/wavesurfer.js@6.6.3"></script>
-    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.js"></script>
-    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.markers.js"></script>
-    <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.minimap.js"></script>
+  <meta charset="utf-8" />
+  <title>Lightdance Editor Web – 前端純版 (修 isdragging + 括號)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-    <!-- 其他样式和脚本 -->
-    <style>
-        body {
-            margin: 0px;
-            padding: 10px;
-            background-color: #000000;
-            color: #FFFFFF;
-        }
-        #waveform {
-            width: 850px;
-            height: 120px;
-            background-color: #000000;
-            margin: 0 auto;
-        }
-        #minimap {
-            width: 850px;
-            height: 35px;
-            background-color: #000000;
-            margin: 0 auto;
-        }
-        #zoom-slider {
-            width: 850px;
-            height: 10px;
-            margin: 20px auto;
-        }
-        #controls {
-            margin: 20px auto;
-            width: 850px;
-            text-align: center;
-        }
-      
+  <!-- WaveSurfer CDN -->
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3"></script>
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.regions.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.markers.js"></script>
+  <script src="https://unpkg.com/wavesurfer.js@6.6.3/dist/plugin/wavesurfer.minimap.js"></script>
+
+  <style>
+    /* ---------- 全域變數 ---------- */
+    :root{
+      --bg:#1e1e1e;   --panel:#252525; --fg:#eee;
+      --primary:#3a3a3a; --border:#444; --handle:#555;
+    }
+    
+    /* ---------- 基礎 ---------- */
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family:"Microsoft JhengHei",Arial,sans-serif;
+      background:var(--bg); color:var(--fg);
+      display:flex; flex-direction:column; min-height:100vh;
+    }
+    
+    /* ========== 外層：上下拖曳 (改用 flex) ========== */
+    .main{
+      flex:1;
+      display:flex; flex-direction:column;   /* 直向排列 */
+      min-height:0;
+    }
+    .v-resizer{
+      height:6px; background:var(--handle); cursor:row-resize; border-radius:3px;
+    }
+    
+    /* ========== 上半：左右拖曳 ========== */
+    .container{
+      flex:1 1 50%;        /* 可被 JS 改高低 */
+      display:flex; gap:8px; padding:8px; min-height:0; min-width:0;
+    }
+    .h-resizer{
+      width:6px; background:var(--handle); cursor:col-resize; border-radius:3px;
+    }
+    
+    /* ------------ 左側 Viewer ------------ */
+    .viewer{
+      flex:1 1 0; min-width:240px;
+      display:flex; flex-direction:column;   /* 重要：讓預覽 & 波形上下排 */
+      background:var(--panel); border:1px solid var(--border);
+      border-radius:6px; padding:8px; gap:6px; overflow:hidden;
+    }
+    /* 上方黑色預覽區塊 (flex:1 撐開) */
+    .viewer .preview{
+      flex:1 1 auto; position:relative;
+      display:flex; align-items:center; justify-content:center;
+      background:#000; border:1px solid var(--border); border-radius:4px;
+      overflow:hidden;
+    }
+    .preview canvas,
+    .preview img,
+    .preview video{
+      width:100%; height:100%;
+      object-fit:contain;       /* 填滿但保比例 */
+    }
+    
+    /* 兩條音波圖 + 滑桿 (固定高，始終貼底) */
+    #waveform,#minimap,#zoom-slider{
+      width:100%; margin:0 auto;
+    }
+    #waveform{height:120px; background:#000; border:1px solid var(--border); border-radius:4px}
+    #minimap{height:35px;  background:#000; border:1px solid var(--border); border-radius:4px}
+    #zoom-slider{margin-top:4px}
+    
+    /* ------------ 右側 SidePanel ------------ */
+    .sidePanel{
+      flex:0 0 300px; min-width:240px;
+      display:flex; flex-direction:column;
+      background:var(--panel); border:1px solid var(--border);
+      border-radius:6px; padding:8px; gap:6px; overflow:auto;
+    }
+    
+    /* ------------ 下半控制區 ------------ */
+    .controlBar{
+      flex:0 0 auto;           /* 高度由內容決定，不受拖曳影響 */
+      display:flex; flex-wrap:wrap; gap:12px 20px;
+      padding:10px; border-top:1px solid var(--border); background:#181818;
+      max-height:40vh; min-height:80px; overflow:auto;
+    }
+    .controlBar section{
+      background:var(--panel); border:1px solid var(--border);
+      border-radius:6px; padding:8px; min-width:230px; flex:1 1 230px;
+    }
+    .controlBar h3{margin:0 0 6px;font-size:14px}
+    
+    /* ------------ 共用表單/按鈕 ------------ */
+    select,input[type="text"],button{
+      width:100%; padding:4px 6px;
+      background:var(--primary); border:1px solid var(--border);
+      border-radius:4px; color:var(--fg); font-size:12px;
+      transition:transform .15s,box-shadow .15s;
+    }
+    button:hover{transform:translateY(-2px); box-shadow:0 4px 8px rgba(0,0,0,.35)}
+    button:active{transform:none; box-shadow:0 2px 4px rgba(0,0,0,.5) inset}
+    
+    .partPanel{
+      display:grid; grid-template-columns:repeat(3,1fr); gap:8px;
+      background:var(--panel); border:1px solid var(--border); border-radius:6px; padding:8px;
+    }
+    .part{display:flex; flex-direction:column; gap:2px}
+    .part label{font-size:12px}
+    .color-box{width:38px; height:18px; border:1px solid var(--border); border-radius:4px; margin-top:4px}
     </style>
+    
+    
 
-    <script type="module">
-        
-        let wavesurfer;
-        var regionsPlugin = WaveSurfer.regions.create();
-        var markersPlugin = WaveSurfer.markers.create();
-        let markers = [];
-        let audiopath;
-        
-      
-        
-        function getCurrentTime() {
-            var currentTime = wavesurfer.getCurrentTime();
-            console.log('Current Time:', currentTime);
-            
+ <script type="module">
+let wavesurfer;
+var regionsPlugin = WaveSurfer.regions.create();
+var markersPlugin = WaveSurfer.markers.create();
+let markers = [];
+let posmarkers=[];
+let audiopath;
+let p;
+
+
+function getCurrentTime() {
+    console.log('getCurrentTime');
+    var currentTime = wavesurfer.getCurrentTime();
+}
+
+function setTime(time) {
+    const duration = wavesurfer.getDuration();
+    const progress = time / duration;
+    wavesurfer.seekTo(progress);
+}
+
+async function updateFrameTimes(regions) {
+    const frametimes = regions.map(region => region.start * 1000); // 转换为毫秒
+    frametimes.push(regions[regions.length - 1].end * 1000); // 添加最后一个区域的结束时间
+
+    const data = { frametimes };
+
+    try {
+        const response = await fetch('/update-fraetimes', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(data)
+        });
+
+        if (!response.ok) {
+            throw new Error('Network response was not ok');
         }
-        
-        function setTime(time) {
-            const duration = wavesurfer.getDuration();
-            const progress = time / duration;
-            wavesurfer.seekTo(progress);
-        }
 
-        async function updateFrameTimes(regions) {
-            const frametimes = regions.map(region => region.start * 1000); // 转换为毫秒
-            frametimes.push(regions[regions.length - 1].end * 1000); // 添加最后一个区域的结束时间
+        const result = await response.json();
+        console.log('Frame times updated:', result);
+    } catch (error) {
+        console.error('Error updating frame times:', error);
+    }
+}
 
-            const data = { frametimes };
-
-            try {
-                const response = await fetch('/update-fraetimes', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(data)
+function reloadRegions() {
+    fetch('../data/data.json')
+        .then(response => response.json())
+        .then(data => {
+            const frametimes = data.frametimes;
+            wavesurfer.clearRegions(); // 清除现有的regions
+            for (let i = 0; i < frametimes.length ; i++) {
+                const startTime = frametimes[i] / 1000; // 转换为秒
+                const endTime = frametimes[i + 1] / 1000; // 转换为秒
+                wavesurfer.addRegion({
+                    start: startTime,
+                    end: endTime,
+                    color: i % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)', // 基数偶数段不同颜色
+                    resize: false, // 允许调整大小
+                    drag: false // 允许拖动
                 });
-
-                if (!response.ok) {
-                    throw new Error('Network response was not ok');
-                }
-
-                const result = await response.json();
-                console.log('Frame times updated:', result);
-            } catch (error) {
-                console.error('Error updating frame times:', error);
             }
-        }
-
-        function reloadRegions() {
-            fetch('data.json')
-                .then(response => response.json())
-                .then(data => {
-                    const frametimes = data.frametimes;
-                    wavesurfer.clearRegions(); // 清除现有的regions
-                    for (let i = 0; i < frametimes.length ; i++) {
-                        const startTime = frametimes[i] / 1000; // 转换为秒
-                        const endTime = frametimes[i + 1] / 1000; // 转换为秒
-                        wavesurfer.addRegion({
-                            start: startTime,
-                            end: endTime,
-                            color: i % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)', // 基数偶数段不同颜色
-                            resize: false, // 允许调整大小
-                            drag: false // 允许拖动
-                        });
-                    }
-                    // 添加最后一个时间点的标记
-                    const lastStartTime = frametimes[frametimes.length ] / 1000;
-                    wavesurfer.addRegion({
-                        start: lastStartTime,
-                        end: lastStartTime + 0.5, // 给最后一个标记一个默认的持续时间
-                        color: frametimes.length % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)', // 基数偶数段不同颜色
-                        resize: false, // 允许调整大小
-                        drag: false // 允许拖动
-                    });
-                })
-                .catch(error => console.error('Error loading data.json:', error));
-                return;
-        }
-
-        
-                // 增加滑動條的值
-        function increaseSliderValue() {
-            var slider = document.getElementById('zoom-slider');
-            var currentValue = parseInt(slider.value, 10);
-            if (currentValue < slider.max) {
-                slider.value = currentValue + 5;
-                updateDisplayValue(slider.value);
-                wavesurfer.zoom(Number( slider.value));
-            }
-        }
-
-        // 減少滑動條的值
-        function decreaseSliderValue() {
-            var slider = document.getElementById('zoom-slider');
-            var currentValue = parseInt(slider.value, 10);
-            if (currentValue > slider.min) {
-                slider.value = currentValue - 5;
-                updateDisplayValue(slider.value);
-                wavesurfer.zoom(Number( slider.value));
-            }
-        }
-
-        // 更新顯示值
-        function updateDisplayValue(value) {
-            var displayValue = document.getElementById('zoom-slider');
-          wavesurfer.zoom(Number(value));
-           
-        }
-
-        // 当網頁載入完成後執行的函式
-        
-        function scrollWaveSurferLeft() {
-            var currentScroll = wavesurfer.drawer.wrapper.scrollLeft;
-            if (currentScroll > 0) {
-                wavesurfer.drawer.wrapper.scrollLeft = currentScroll - 10; // 每次滾動 10px
-            }
-        }
-
-        function scrollWaveSurferRight() {
-            var currentScroll = wavesurfer.drawer.wrapper.scrollLeft;
-            wavesurfer.drawer.wrapper.scrollLeft = currentScroll + 10; // 每次滾動 10px
-         
-        }
-     
-        async function fetchData(url) {
-            try {
-                const response = await fetch(url);
-                return await response.json();
-            } catch (error) {
-                console.error(`Error fetching data from ${url}:`, error);
-                throw error;
-            }
-        }
-        async function initializeAudio() {
-            try {
-                const data = await fetchData(settingUrl);
-                audiopath = `/static/${data.audio}`;
-                console.log('Audio path initialized:', audiopath);
-                await initializeWaveSurfer();
-            } catch (error) {
-                console.error('Error initializing audio:', error);
-            }
-        }
-
-        async function initializeWaveSurfer() {
-           
-            wavesurfer = WaveSurfer.create({
-                container: '#waveform',
-                waveColor: '#FFFFFF',
-                progressColor: '#8a8a8a',
-                height: 120,
-                hideScrollbar: true,
-                interact: true,
-                plugins: [
-                    regionsPlugin,
-                    markersPlugin,
-                    WaveSurfer.minimap.create({
-                    container: '#minimap',
-                    waveColor: '#FFFFFF',
-                    progressColor: '#777',
-                    height: 35
-                    })  ,
-                    
-                ]
+            // 添加最后一个时间点的标记
+            const lastStartTime = frametimes[frametimes.length ] / 1000;
+            wavesurfer.addRegion({
+                start: lastStartTime,
+                end: lastStartTime + 0.5, // 给最后一个标记一个默认的持续时间
+                color: frametimes.length % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)', // 基数偶数段不同颜色
+                resize: false, // 允许调整大小
+                drag: false // 允许拖动
             });
+        })
+        .catch(error => console.error('Error loading data.json:', error));
+        return;
+}
 
 
-            if (!regionsPlugin || !markersPlugin) {
-                console.error('WaveSurfer 插件未正确初始化');
-                return;
+        // 增加滑動條的值
+function increaseSliderValue() {
+    var slider = document.getElementById('zoom-slider');
+    var currentValue = parseInt(slider.value, 10);
+    if (currentValue < slider.max) {
+        slider.value = currentValue + 5;
+        updateDisplayValue(slider.value);
+        wavesurfer.zoom(Number( slider.value));
+    }
+}
+
+// 減少滑動條的值
+function decreaseSliderValue() {
+    var slider = document.getElementById('zoom-slider');
+    var currentValue = parseInt(slider.value, 10);
+    if (currentValue > slider.min) {
+        slider.value = currentValue - 5;
+        updateDisplayValue(slider.value);
+        wavesurfer.zoom(Number( slider.value));
+    }
+}
+
+// 更新顯示值
+function updateDisplayValue(value) {
+    var displayValue = document.getElementById('zoom-slider');
+  wavesurfer.zoom(Number(value));
+   
+}
+
+// 当網頁載入完成後執行的函式
+
+function scrollWaveSurferLeft() {
+    var currentScroll = wavesurfer.drawer.wrapper.scrollLeft;
+    if (currentScroll > 0) {
+        wavesurfer.drawer.wrapper.scrollLeft = currentScroll - 10; // 每次滾動 10px
+    }
+}
+
+function scrollWaveSurferRight() {
+    var currentScroll = wavesurfer.drawer.wrapper.scrollLeft;
+    wavesurfer.drawer.wrapper.scrollLeft = currentScroll + 10; // 每次滾動 10px
+ 
+}
+
+async function fetchData(url) {
+    try {
+        const response = await fetch(url);
+        return await response.json();
+    } catch (error) {
+        console.error(`Error fetching data from ${url}:`, error);
+        throw error;
+    }
+}
+async function initializeAudio() {
+    try {
+        const data = await fetchData('../data/setting.json');
+        audiopath = data.audio;
+        console.log('Audio path initialized:', audiopath);
+        await initializeWaveSurfer();
+    } catch (error) {
+        console.error('Error initializing audio:', error);
+    }
+}
+
+async function initializeWaveSurfer() {
+   
+    wavesurfer = WaveSurfer.create({
+        container: '#waveform',
+        waveColor: '#FFFFFF',
+        progressColor: '#8a8a8a',
+        pixelRatio: 1,        // 降解析度，渲染點數少一半:contentReference[oaicite:3]{index=3}
+        partialRender: true,  // 只畫可視範圍，用 PeakCache 加速:contentReference[oaicite:4]{index=4}
+        height: 120,
+        hideScrollbar: true,
+        interact: true,
+        plugins: [
+            regionsPlugin,
+            markersPlugin,
+            WaveSurfer.minimap.create({
+            container: '#minimap',
+            waveColor: '#FFFFFF',
+            progressColor: '#777',
+            height: 35
+            })  ,
+            
+        ]
+    });
+
+
+    if (!regionsPlugin || !markersPlugin) {
+        console.error('WaveSurfer 插件未正确初始化');
+        return;
+    }
+
+    // 加载音频
+    try {
+        await wavesurfer.load(audiopath);
+    } catch (error) {
+        console.error('加载音频时出错:', error);
+        return;
+    }
+    // 加载音频
+    await wavesurfer.load(audiopath);
+
+    wavesurfer.on('ready', () => {
+        console.log('WaveSurfer is ready');
+        loadDataFromJSON();
+
+        console.log('載入數據');
+        setupEventListeners();
+        console.log('綁定事件');
+        var slider = document.getElementById('zoom-slider');
+        console.log('綁定滑動條');
+        slider.addEventListener('input', function() {
+        updateDisplayValue(this.value);
+        });
+        Object.assign(window, {
+            wavesurfer,
+        });
+        
+        const waveformEl = document.getElementById('waveform');
+        const MIN_ZOOM    = 1;    // 和 <input min="1"> 對應
+        const MAX_ZOOM    = 200;  // 和 <input max="200"> 對應
+        const ZOOM_STEP   = 30;    // 每格跳 5，和 increase/decrease 保持一致
+        const SCROLL_STEP = 30;   // 左右捲動靈敏度（px）
+
+        waveformEl.addEventListener(
+        'wheel',
+        (e) => {
+            e.preventDefault();            // 阻止整頁上下捲
+
+            /* Ctrl 被按住 → 做縮放 */
+            if (e.ctrlKey) {
+            let newZoom = parseInt(slider.value, 10);
+
+            // deltaY < 0 代表滾輪往上（放大），> 0 往下（縮小）
+            newZoom += (e.deltaY < 0 ?  ZOOM_STEP : -ZOOM_STEP);
+
+            // 限制最大最小值
+            newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+
+            slider.value = newZoom;          // 更新滑桿
+            updateDisplayValue(newZoom);     // 呼叫既有函式，裡面會執行 wavesurfer.zoom()
             }
 
-            // 加载音频
-            try {
-                await wavesurfer.load(audiopath);
-            } catch (error) {
-                console.error('加载音频时出错:', error);
-                return;
+            /* 沒按 Ctrl → 左右捲動畫面 */
+            else {
+            if (e.deltaY > 0) {
+                wavesurfer.drawer.wrapper.scrollLeft += SCROLL_STEP; // 向右
+            } else {
+                wavesurfer.drawer.wrapper.scrollLeft -= SCROLL_STEP; // 向左
             }
-            // 加载音频
-            await wavesurfer.load(audiopath);
+            }
+        },
+        { passive: false }
+        );
+        // 启动动画
+        var startTime = (new Date()).getTime();
+        animate(darr, canvas, ctx, startTime);
+    });
+}
 
-            wavesurfer.on('ready', () => {
-                console.log('WaveSurfer is ready');
-                loadDataFromJSON();
-                console.log('載入數據');
-                setupEventListeners();
-                console.log('綁定事件');
+function setupEventListeners() {
+    wavesurfer.on('region-update-end', updateJSON);
+    wavesurfer.on('marker-drop', function(marker) {
+        updateMarker(marker.label,marker.time);
+    });
+}
+
+
+function updateMarker(id,newtime) {
+    switch (true) {
+        // 檢查是否為數字字串（可以是多位數）
+        case /^[0-9]+$/.test(id):
+            handler.updateframe(id, newtime);
+            break;
+        // 檢查是否為 "p" 開頭的字串，後接多位數字
+        case /^p[0-9]+$/.test(id):
+            p=id.slice(1);
+            handler.updatepostime(p,newtime);
+            break;
+    }
+   
+}
+
+function updateJSON() {
+    const data = { 
+        frametimes: regionsPlugin.getRegions().map(r => r.start * 1000),
+        markers: markers.map(m => m.time * 1000)
+    };
+    localStorage.setItem('audioData', JSON.stringify(data));
+    updateFrameTimes(regionsPlugin.getRegions());
+}
+
+function loadDataFromJSON() {
+    const savedData = localStorage.getItem('audioData');
+    if (savedData) {
+
+        loadData(JSON.parse(savedData));
+        
+    } else {
+        console.log('載入數據1');
+        fetch('../data/data.json')
+            .then(response => response.json())
+            .then(data => {
+                loadData(data);
+            })
+            .catch(error => console.error('Error loading data:', error));
+    }
+}
+
+function loadData(data) {
+        // 加载 regions
+        wavesurfer.clearRegions();
+
+        if (data.frametimes) {
+            for (let i = 0; i < data.frametimes.length - 1; i++) {
+                const startTime = data.frametimes[i] / 1000;
+                const endTime = data.frametimes[i + 1] / 1000;
+                wavesurfer.addRegion({
+                    start: startTime,
+                    end: endTime,
+                    color: i % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)',
+                    resize: false,
+                    drag: false
+                });
+            }
+        }
+
+        // 加载 markers
+       
+        wavesurfer.clearMarkers();
+        
+
+        markers = [];
+        if (data.frametimes) {
+            data.frametimes.forEach((time, index) => {
+                if(index==0){
+                    return;
+                }
+                const markerId = wavesurfer.addMarker({
+                    time: time / 1000,
+                    color: 'rgba(120, 179, 150, 1)',
+                    position: 'top',
+                    id:index.toString(),
+                    label:index.toString(),
+                    draggable: true
+                });
+                markers.push({ id: markerId, time: time / 1000 });
+            });
+        }
+        posmarkers = [];
+        if (postime) {
+            postime.forEach((time, index) => {
+                if(index==0){
+                    return
+                }
+                const posmarkerId = wavesurfer.addMarker({
+                    time: time ,
+                    color: 'rgba(218, 128, 126, 1)',
+                    position: 'bottom',
+                    id:"p"+index.toString(),
+                    label:"p"+index.toString(),
+                    draggable: true
+                });
+                posmarkers.push({ id: posmarkerId, time: time });
+            });
+        }
+    }
+Object.assign(window, {
+loadDataFromJSON,
+initializeWaveSurfer,
+initializeAudio,
+fetchData,
+getCurrentTime,
+setTime,
+reloadRegions,
+increaseSliderValue,
+decreaseSliderValue,
+scrollWaveSurferLeft,
+scrollWaveSurferRight,
+});
+</script>
+</head>
+<body>
+  <div class="main">
+
+  <div class="container">
+   
+    <div class="viewer">
+      <div class="preview">
+        <canvas id="myCanvas" width="850" height="300"></canvas>
+      </div>
+      <div id="waveform"></div>
+      <div id="minimap"></div>
+      <input id="zoom-slider" type="range" min="1" max="200" value="100" />
+    </div>
+    <div class="h-resizer"></div>
+    <div class="partPanel" id="partPanel">
+      <select id="dancerSelect" style="grid-column:span 3"></select>
+    </div>
+  </div>
+  <div class="v-resizer"></div>
+  <div class="controlBar">
+    <section>
+      <h3>命名顏色</h3>
+      <input id="colorNameInput" type="text" placeholder="顏色名稱" />
+      <select id="colorSelect"></select>
+      <div class="color-box" id="colorPreview"></div>
+      <button id="addColorBtn">add</button>
+      <button id="renameColorBtn">rename</button>
+      <button id="delColorBtn">delete</button>
+    </section>
+    <section>
+      <h3>presets</h3>
+      <select id="presetSelect"></select>
+      <button id="loadPresetBtn">load</button>
+      <input id="presetNameInput" type="text" placeholder="preset 名稱" />
+      <button id="savePresetBtn">save</button>
+      <button id="deletePresetBtn">delete</button>
+    </section>
+    <section>
+      <h3>debug / UDP</h3>
+      <button id="debugToggleBtn">DEBUG</button>
+      <button id="udpBtn">UDP</button>
+    </section>
+    <section>
+      <h3>幀操作</h3>
+      <button id="newKeyBtn">新增 key</button>
+      <button id="delKeyBtn">刪除 key</button>
+    </section>
+  </div>
+</div>
+
+  <!-- ===== 腳本區 ===== -->
+
+  <!-- 2. Dummy 依賴 (供 main.js 使用) -->
+  <script>
+    window.fetchData = async url => { const r = await fetch(url); if(!r.ok) throw new Error(r.status); return r.json(); };
+    window.handler = { updatepos(){}, updateframe(){}, updatepostime(){}, selectdancer(){} };
+    window.wavesurfer = { getCurrentTime: () => 0, seekTo: () => {}, playPause: () => {}, zoom: () => {}, drawer: { wrapper: { scrollLeft: 0 } } };
+    window.getCurrentTime = () => 0;   // main.js 會呼叫
+    window.setTime = (t) => {};        // 預留函式供 main.js 呼叫
+    window.isdragging = false; // 給 main.js 用的全域旗標
+  </script>
+
+  <!-- 3. Dancer 模型 -->
+  <script src="dancer.js"></script>
+  <!-- 4. main.js 原本邏輯 -->
+  <script src="main.js"></script>
+
+  <!-- 5. 真正初始化前端 & WaveSurfer -->
+  <script>
+    const parts=["頭盔","面罩","左肩","右肩","左臂","右臂","左手","右手","胸口","背部","腰帶","左大腿","右大腿","左小腿","右小腿","左鞋","右鞋","道具"];
+    const palette=["#000","#f00","#0f0","#00f","#ff0","#f0f","#0ff","#fff"];
+    const dancerNames=["migo","miqo"];
+
+    function buildInterface(){
+      const dancerSel=document.getElementById('dancerSelect');
+      dancerNames.forEach(n=>dancerSel.appendChild(new Option(n,n)));
+      const panel=document.getElementById('partPanel');
+      parts.forEach((p,i)=>{
+        const wrap=document.createElement('div');wrap.className='part';
+        const lbl=document.createElement('label');lbl.textContent=p;
+        const sel=document.createElement('select');palette.forEach(c=>{const o=new Option(c,c);o.style.backgroundColor=c;sel.appendChild(o);});
+        sel.addEventListener('change',e=>console.log(`part${i}:${e.target.value}`));
+        wrap.append(lbl,sel);panel.appendChild(wrap);
+      });
+    }
+
+    async function initAudio(){
+      let audio='song.mp3';
+      try{const s=await fetch('./data/setting.json').then(r=>r.ok?r.json():null);if(s?.audio) audio=s.audio;}catch{}
+      const realWave=WaveSurfer.create({container:'#waveform',waveColor:'#fff',progressColor:'#8a8a8a',height:120,hideScrollbar:true,pixelRatio:1,partialRender:true,
+        plugins:[WaveSurfer.regions.create(),WaveSurfer.markers.create(),WaveSurfer.minimap.create({container:'#minimap',waveColor:'#fff',progressColor:'#777',height:35})]});
+      try{await realWave.load(audio);}catch(e){console.error('audio load',e);}  
+      realWave.on('ready',async()=>{
+        console.log('WaveSurfer is ready');
+        console.log('綁定事件');
                 var slider = document.getElementById('zoom-slider');
                 console.log('綁定滑動條');
                 slider.addEventListener('input', function() {
@@ -238,141 +582,133 @@
                 Object.assign(window, {
                     wavesurfer,
                 });
+                
+                const waveformEl = document.getElementById('waveform');
+                const MIN_ZOOM    = 1;    // 和 <input min="1"> 對應
+                const MAX_ZOOM    = 200;  // 和 <input max="200"> 對應
+                const ZOOM_STEP   = 30;    // 每格跳 5，和 increase/decrease 保持一致
+                const SCROLL_STEP = 30;   // 左右捲動靈敏度（px）
 
+                waveformEl.addEventListener(
+                'wheel',
+                (e) => {
+                    e.preventDefault();            // 阻止整頁上下捲
+
+                    /* Ctrl 被按住 → 做縮放 */
+                    if (e.ctrlKey) {
+                    let newZoom = parseInt(slider.value, 10);
+
+                    // deltaY < 0 代表滾輪往上（放大），> 0 往下（縮小）
+                    newZoom += (e.deltaY < 0 ?  ZOOM_STEP : -ZOOM_STEP);
+
+                    // 限制最大最小值
+                    newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, newZoom));
+
+                    slider.value = newZoom;          // 更新滑桿
+                    updateDisplayValue(newZoom);     // 呼叫既有函式，裡面會執行 wavesurfer.zoom()
+                    }
+
+                    /* 沒按 Ctrl → 左右捲動畫面 */
+                    else {
+                    if (e.deltaY > 0) {
+                        wavesurfer.drawer.wrapper.scrollLeft += SCROLL_STEP; // 向右
+                    } else {
+                        wavesurfer.drawer.wrapper.scrollLeft -= SCROLL_STEP; // 向左
+                    }
+                    }
+                },
+                { passive: false }
+                );
                 // 启动动画
                 var startTime = (new Date()).getTime();
-                animate(darr, canvas, ctx, startTime);
-            });
+        window.wavesurfer = realWave;
+        window.getCurrentTime = () => realWave.getCurrentTime();
+        window.setTime = t => { const dur = realWave.getDuration(); if(dur) realWave.seekTo(t/dur); };
+        document.getElementById('zoom-slider').addEventListener('input',e=>realWave.zoom(Number(e.target.value)));
+        if(window.initializeSettings) await window.initializeSettings();
+        if(window.initializedanceData) await window.initializedanceData();
+        if(window.initializeposData) await window.initializeposData();
+        if(window.initializeData) await window.initializeData();
+        if(window.animate && window.darr){
+          const canvas=document.getElementById('myCanvas');
+          const ctx=canvas.getContext('2d');
+          animate(darr,canvas,ctx,performance.now());
         }
+      });
+    }
 
-        function setupEventListeners() {
-            wavesurfer.on('region-update-end', updateJSON);
-            wavesurfer.on('marker-drop', function(marker) {
-                updateMarker(marker.label,marker.time);
-            });
-        }
-
-        
-        function updateMarker(id,newtime) {
-            handler.updateframe(id, newtime);
-        }
-
-        function updateJSON() {
-            const data = { 
-                frametimes: regionsPlugin.getRegions().map(r => r.start * 1000),
-                markers: markers.map(m => m.time * 1000)
-            };
-            localStorage.setItem('audioData', JSON.stringify(data));
-            updateFrameTimes(regionsPlugin.getRegions());
-        }
-
-        function loadDataFromJSON() {
-            const savedData = localStorage.getItem('audioData');
-            if (savedData) {
-
-                loadData(JSON.parse(savedData));
-                
-            } else {
-                console.log('載入數據1');
-                fetch(dataUrl)
-                    .then(response => response.json())
-                    .then(data => {
-                        loadData(data);
-                    })
-                    .catch(error => console.error('Error loading data:', error));
-            }
-        }
-
-        function loadData(data) {
-                // 加载 regions
-                wavesurfer.clearRegions();
-
-                if (data.frametimes) {
-                    for (let i = 0; i < data.frametimes.length - 1; i++) {
-                        const startTime = data.frametimes[i] / 1000;
-                        const endTime = data.frametimes[i + 1] / 1000;
-                        wavesurfer.addRegion({
-                            start: startTime,
-                            end: endTime,
-                            color: i % 2 === 0 ? 'rgba(50, 0, 0, 0.5)' : 'rgba(0, 50, 0, 0.5)',
-                            resize: false,
-                            drag: false
-                        });
-                    }
-                }
-
-                // 加载 markers
-               
-                wavesurfer.clearMarkers();
-                
-
-                markers = [];
-                if (data.frametimes) {
-                    data.frametimes.forEach((time, index) => {
-                        const markerId = wavesurfer.addMarker({
-                            time: time / 1000,
-                            color: 'rgba(120, 179, 150, 1)',
-                            position: 'top',
-                            id:index.toString(),
-                            label:index.toString(),
-                            draggable: true
-                        });
-                        markers.push({ id: markerId, time: time / 1000 });
-                    });
-                }
-            }
-        Object.assign(window, {
-        loadDataFromJSON,
-        initializeWaveSurfer,
-        initializeAudio,
-        fetchData,
-        getCurrentTime,
-        setTime,
-        reloadRegions,
-        increaseSliderValue,
-        decreaseSliderValue,
-        scrollWaveSurferLeft,
-        scrollWaveSurferRight,
-    });
-    </script>
-</head>
-<body>
-    <center>
-        <canvas id="myCanvas" width="850" height="300" style="background-color: #000000" autoplay></canvas>
-        <div id="waveform"></div>
-        <div id="minimap"></div>
-        <input id="zoom-slider" type="range" min="1" max="200" value="100">
-       
-    </center>
-
-
-    <script src="{{ url_for('static', filename='js/dancer.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/pos.js') }}"></script>
-    
-
-    <script>
-
-        const settingUrl = "{{ url_for('static', filename='setting.json') }}";
-        const dataUrl = "{{ url_for('static', filename='data.json') }}";
-        
-
-        function initializeQWebChannel() {
-            new QWebChannel(qt.webChannelTransport, function(channel) {
-                window.handler = channel.objects.handler;
-                console.log('QWebChannel initialized');
-            });
-        }
-        document.addEventListener('DOMContentLoaded', async function() {
-      
+    window.addEventListener('DOMContentLoaded', async function(){
+      buildInterface()
             await initializeAudio();
             await initializeSettings();
+            await initializedanceData();
+            await initializeposData();
             await initializeData();
-        });
-        document.addEventListener('DOMContentLoaded',function() {
-            initializeEditor();
+    });
+  </script>
+
+
+<script>
+  /* —— 水平拖曳 —— */
+  function initHorizontal(resizer, left, right){
+    resizer.addEventListener('pointerdown', startDrag);
+    function startDrag(e){
+      e.preventDefault();
+      document.addEventListener('pointermove', onDrag);
+      document.addEventListener('pointerup',   stopDrag);
+    }
+    function onDrag(e){
+      const min = 200;                               // 最小寬度
+      const total = left.offsetWidth + right.offsetWidth + resizer.offsetWidth;
+      let newLeft = e.clientX - left.getBoundingClientRect().left;
+      newLeft = Math.max(min, Math.min(newLeft, total - min));
+      left.style.width  = newLeft + 'px';
+      right.style.width = (total - newLeft) + 'px';
+    }
+    function stopDrag(){
+      document.removeEventListener('pointermove', onDrag);
+      document.removeEventListener('pointerup',   stopDrag);
+    }
+  }
+  
+  /* ——— 垂直拖曳：只改 container 高度 ——— */
+function initVertical(resizer, topElem, bottomElem){
+  resizer.addEventListener('pointerdown', e=>{
+    e.preventDefault();
+    const startY    = e.clientY;
+    const startH    = topElem.getBoundingClientRect().height;
+    const minH      = 120;                // 上半部最小高度
+    const maxH      = window.innerHeight - 100; // 保底不覆蓋 controlBar
+
+    const move = ev=>{
+      let newH = startH + (ev.clientY - startY);
+      newH = Math.max(minH, Math.min(newH, maxH));
+      topElem.style.flexBasis = newH + 'px';  // 改 flex-basis
+      
+    };
+    const up = ()=>{
+      document.removeEventListener('pointermove', move);
+      document.removeEventListener('pointerup',   up);
+    };
+    document.addEventListener('pointermove', move);
+    document.addEventListener('pointerup',   up);
   });
-        
-    </script> 
-    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+  
+}
+
+  
+  window.addEventListener('DOMContentLoaded', ()=>{
+    initHorizontal(
+      document.querySelector('.h-resizer'),
+      document.querySelector('.viewer'),
+      document.querySelector('.partPanel')
+    );
+    initVertical(
+      document.querySelector('.v-resizer'),
+      document.querySelector('.container'),
+  
+    );
+  });
+  </script>
 </body>
 </html>
